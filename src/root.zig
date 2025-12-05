@@ -1,5 +1,31 @@
 const std = @import("std");
 
+pub fn totalItems(comptime T: type) usize {
+    return switch (@typeInfo(T)) {
+        .@"enum" => |enum_info| {
+            if (enum_info.fields.len == 0) @compileError("Enum has no fields.");
+
+            var max_value = enum_info.fields[0].value;
+            inline for (enum_info.fields[1..]) |field| {
+                max_value = @max(max_value, field.value);
+            }
+
+            return max_value + 1;
+        },
+        .@"int", .@"comptime_int" => std.math.maxInt(T) + 1,
+        else => @compileError("supports only enums and integers"),
+    };
+}
+
+pub fn asIndex(comptime T: type, i: anytype) usize {
+    if (@TypeOf(i) != T) @compileError("type mismatch");
+    return switch (@typeInfo(T)) {
+        .@"enum" => @intFromEnum(i),
+        .@"int", .@"comptime_int" => i,
+        else => @compileError("supports only enums and integers"),
+    };
+}
+
 pub fn StaticIntegralMap(
     comptime K: type,
     comptime V: type,
@@ -14,31 +40,6 @@ pub fn StaticIntegralMap(
             result: V,
         };
 
-        fn totalItems(comptime T: type) usize {
-            return switch (@typeInfo(T)) {
-                .@"enum" => |enum_info| {
-                    if (enum_info.fields.len == 0) @compileError("Enum has no fields.");
-
-                    var max_value = enum_info.fields[0].value;
-                    inline for (enum_info.fields[1..]) |field| {
-                        max_value = @max(max_value, field.value);
-                    }
-
-                    return max_value + 1;
-                },
-                .@"int", .@"comptime_int" => std.math.maxInt(T) + 1,
-                else => @compileError("supports only enums and integers"),
-            };
-        }
-
-        fn asIndex(i: anytype) usize {
-            return switch (@typeInfo(K)) {
-                .@"enum" => @intFromEnum(i),
-                .@"int", .@"comptime_int" => i,
-                else => @compileError("supports only enums and integers"),
-            };
-        }
-
         items: [totalItems(K)]V,
 
         pub inline fn init(default_value: V, cases: []const Case) Self {
@@ -46,9 +47,24 @@ pub fn StaticIntegralMap(
             for (cases) |case| {
                 switch (case.pattern) {
                     .basic => |i| {
-                        self.items[asIndex(i)] = case.result;
+                        self.items[asIndex(K, i)] = case.result;
                     },
-                    .range => |r| for (asIndex(r.start)..asIndex(r.end + 1)) |i| {
+                    .range => |r| for (asIndex(K, r.start)..asIndex(K, r.end + 1)) |i| {
+                        self.items[i] = case.result;
+                    },
+                }
+            }
+            return self;
+        }
+
+        pub inline fn initItems(items: [totalItems(K)]V, cases: []const Case) Self {
+            var self: Self = .{ .items = items };
+            for (cases) |case| {
+                switch (case.pattern) {
+                    .basic => |i| {
+                        self.items[asIndex(K, i)] = case.result;
+                    },
+                    .range => |r| for (asIndex(K, r.start)..asIndex(K, r.end + 1)) |i| {
                         self.items[i] = case.result;
                     },
                 }
@@ -57,7 +73,7 @@ pub fn StaticIntegralMap(
         }
 
         pub inline fn get(self: *const Self, key: K) V {
-            return self.items[asIndex(key)];
+            return self.items[asIndex(K, key)];
         }
     };
 }
