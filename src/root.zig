@@ -1,5 +1,22 @@
 const std = @import("std");
 
+pub fn HandleMap(comptime T: type, comptime Context: type) type {
+    return struct {
+        pub const empty: @This() = .{ };
+        pub const Handle = struct { handle: u32 };
+        map: std.ArrayHashMapUnmanaged(T, void, Context, true) = .empty,
+
+        pub fn put(self: *@This(), allocator: std.mem.Allocator, item: T) !Handle {
+            const gop = try self.map.getOrPut(allocator, item);
+            return .{ .handle = @intCast(gop.index) };
+        }
+
+        pub fn get(self: *@This(), handle: Handle) []const u8 {
+            return self.map.keys()[handle.handle];
+        }
+    };
+}
+
 pub fn totalItems(comptime T: type) usize {
     return switch (@typeInfo(T)) {
         .@"enum" => |enum_info| {
@@ -26,6 +43,10 @@ pub fn asIndex(comptime T: type, i: anytype) usize {
     };
 }
 
+pub fn Range(comptime T: type) type {
+    return struct { start: T, end: T };
+}
+
 pub fn StaticIntegralMap(
     comptime K: type,
     comptime V: type,
@@ -35,7 +56,7 @@ pub fn StaticIntegralMap(
         const Case = struct {
             pattern: union(enum) {
                 basic: K,
-                range: struct { start: K, end: K },
+                range: Range(K),
             },
             result: V,
         };
@@ -49,7 +70,7 @@ pub fn StaticIntegralMap(
                     .basic => |i| {
                         self.items[asIndex(K, i)] = case.result;
                     },
-                    .range => |r| for (asIndex(K, r.start)..asIndex(K, r.end + 1)) |i| {
+                    .range => |r| for (asIndex(K, r.start)..asIndex(K, r.end) + 1) |i| {
                         self.items[i] = case.result;
                     },
                 }
@@ -64,7 +85,7 @@ pub fn StaticIntegralMap(
                     .basic => |i| {
                         self.items[asIndex(K, i)] = case.result;
                     },
-                    .range => |r| for (asIndex(K, r.start)..asIndex(K, r.end + 1)) |i| {
+                    .range => |r| for (asIndex(K, r.start)..asIndex(K, r.end) + 1) |i| {
                         self.items[i] = case.result;
                     },
                 }
