@@ -16,7 +16,6 @@ pub fn StaticIntegralMap(
 
         fn totalItems(comptime T: type) usize {
             return switch (@typeInfo(T)) {
-                .@"struct" => return @bitSizeOf(T) * 255 + 1,
                 .@"enum" => |enum_info| {
                     if (enum_info.fields.len == 0) @compileError("Enum has no fields.");
 
@@ -34,10 +33,6 @@ pub fn StaticIntegralMap(
 
         fn asIndex(i: anytype) usize {
             return switch (@typeInfo(K)) {
-                .@"struct" => blk: {
-                    const as_int: std.meta.Int(.unsigned, @bitSizeOf(K)) = @bitCast(i);
-                    break :blk @intCast(as_int);
-                },
                 .@"enum" => @intFromEnum(i),
                 .@"int", .@"comptime_int" => i,
                 else => @compileError("supports only enums and integers"),

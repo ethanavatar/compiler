@@ -2,39 +2,18 @@ const std = @import("std");
 const root = @import("root.zig");
 const StaticIntegralMap = root.StaticIntegralMap;
 
-fn ClassifiedCharacter(comptime SpecialClass: type) type {
-    const SpecialOrLiteral = enum(u1) { special, literal };
-    return packed struct {
-        data: packed union {
-            special: SpecialClass,
-            literal: u8,
-        },
-        tag: SpecialOrLiteral,
-
-        pub inline fn special(kind: SpecialClass) @This() {
-            return .{ .tag = .special, .data = .{ .special = kind } };
-        }
-
-        pub inline fn literal(kind: u8) @This() {
-            return .{ .tag = .literal, .data = .{ .literal = kind } };
-        }
-    };
-}
-
-const SpecialCharacterKind = enum(u8) {
-    Unknown,
+const CharacterClass = enum(u8) {
     Eof,
-
-    Whitespace,
-    Letter,
-    Digit,
+    Digit, Letter, Whitespace,
+    GenericCharacter,
 };
-const CharacterKind = ClassifiedCharacter(SpecialCharacterKind);
 
-const SpecialState = enum(u8) {
+const State = enum(u8) {
     Illegal,
     Start,
     Eof,
+
+    GenericCharacter,
 
     InIdentifier,
     EndIdentifier,
@@ -42,112 +21,76 @@ const SpecialState = enum(u8) {
     InInteger,
     EndInteger,
 };
-const State = ClassifiedCharacter(SpecialState);
 
-test {
-    try std.testing.expectEqual(@bitSizeOf(CharacterKind), 9);
-    try std.testing.expectEqual(@bitSizeOf(State), 9);
-}
+const character_class_map = StaticIntegralMap(u8, CharacterClass).init(.GenericCharacter, &.{
+    .{ .pattern = .{ .basic =  0 }, .result = .Eof },
 
-const SpecialTokenKind = enum(u8) {
-    Illegal,
-    Identifier,
-    Integer,
+    .{ .pattern = .{ .range = .{ .start = '0', .end = '9' } }, .result = .Digit },
+    .{ .pattern = .{ .range = .{ .start = 'a', .end = 'z' } }, .result = .Letter },
+    .{ .pattern = .{ .range = .{ .start = 'A', .end = 'Z' } }, .result = .Letter },
+    .{ .pattern = .{ .basic = '_' }, .result = .Letter },
 
-    KeywordPub,
-    KeywordFn,
-
-    TypeVoid,
-    TypeI32,
-};
-const TokenKind = ClassifiedCharacter(SpecialTokenKind);
-
-const character_map = StaticIntegralMap(u8, CharacterKind).init(CharacterKind.special(.Unknown), &.{
-    .{ .pattern = .{ .basic =  0  }, .result = CharacterKind.special(.Eof) },
-
-    .{ .pattern = .{ .range = .{ .start = '0', .end = '9' } }, .result = CharacterKind.special(.Digit) },
-    .{ .pattern = .{ .range = .{ .start = 'a', .end = 'z' } }, .result = CharacterKind.special(.Letter) },
-    .{ .pattern = .{ .range = .{ .start = 'A', .end = 'Z' } }, .result = CharacterKind.special(.Letter) },
-    .{ .pattern = .{ .basic = '_' }, .result = CharacterKind.special(.Letter) },
-
-    .{ .pattern = .{ .basic = ' ' }, .result = CharacterKind.special(.Whitespace) },
-    .{ .pattern = .{ .range = .{ .start = '\t', .end = '\r' } }, .result = CharacterKind.special(.Whitespace) },
-
-    .{ .pattern = .{ .basic = '(' }, .result = CharacterKind.literal('(') },
-    .{ .pattern = .{ .basic = ')' }, .result = CharacterKind.literal(')') },
-
-    .{ .pattern = .{ .basic = '{' }, .result = CharacterKind.literal('{') },
-    .{ .pattern = .{ .basic = '}' }, .result = CharacterKind.literal('}') },
-
-    .{ .pattern = .{ .basic = ';' }, .result = CharacterKind.literal(';') },
-    .{ .pattern = .{ .basic = ':' }, .result = CharacterKind.literal(':') },
-    .{ .pattern = .{ .basic = ',' }, .result = CharacterKind.literal(',') },
-
-    .{ .pattern = .{ .basic = '+' }, .result = CharacterKind.literal('+') },
+    .{ .pattern = .{ .basic = ' ' }, .result = .Whitespace },
+    .{ .pattern = .{ .range = .{ .start = '\t', .end = '\r' } }, .result = .Whitespace },
 });
 
-const CharToState = StaticIntegralMap(CharacterKind, State);
-const transition_map = StaticIntegralMap(State, CharToState).init(CharToState.init(State.special(.Illegal), &.{}), &.{
+const CharacterClassToState = StaticIntegralMap(CharacterClass, State);
+const default_transition = CharacterClassToState.init(State.Illegal, &.{});
+const transition_map = StaticIntegralMap(State, CharacterClassToState).init(default_transition, &.{
 
-    .{ .pattern = .{ .basic = State.special(.Start) }, .result = CharToState.init(State.special(.Illegal), &.{
-        .{ .pattern = .{ .basic = CharacterKind.special(.Eof)    }, .result = State.special(.Eof) },
-        .{ .pattern = .{ .basic = CharacterKind.special(.Letter) }, .result = State.special(.InIdentifier) },
-        .{ .pattern = .{ .basic = CharacterKind.special(.Digit)  }, .result = State.special(.InInteger) },
-
-        .{ .pattern = .{ .basic = CharacterKind.literal('(') }, .result = State.literal('(') },
-        .{ .pattern = .{ .basic = CharacterKind.literal(')') }, .result = State.literal(')') },
-
-        .{ .pattern = .{ .basic = CharacterKind.literal('{') }, .result = State.literal('{') },
-        .{ .pattern = .{ .basic = CharacterKind.literal('}') }, .result = State.literal('}') },
-
-        .{ .pattern = .{ .basic = CharacterKind.literal(',') }, .result = State.literal(',') },
-        .{ .pattern = .{ .basic = CharacterKind.literal(';') }, .result = State.literal(';') },
-        .{ .pattern = .{ .basic = CharacterKind.literal(':') }, .result = State.literal(':') },
-
-        .{ .pattern = .{ .basic = CharacterKind.literal('+') }, .result = State.literal('+') },
+    .{ .pattern = .{ .basic = .Start }, .result = CharacterClassToState.init(.Illegal, &.{
+        .{ .pattern = .{ .basic = .Eof    }, .result = .Eof },
+        .{ .pattern = .{ .basic = .Letter }, .result = .InIdentifier },
+        .{ .pattern = .{ .basic = .Digit  }, .result = .InInteger },
+        .{ .pattern = .{ .basic = .GenericCharacter }, .result = .GenericCharacter },
     }) },
 
-    .{ .pattern = .{ .basic = State.special(.InIdentifier) }, .result = CharToState.init(State.special(.EndIdentifier), &.{
-        .{ .pattern = .{ .basic = CharacterKind.special(.Letter) }, .result = State.special(.InIdentifier) },
-        .{ .pattern = .{ .basic = CharacterKind.special(.Digit)  }, .result = State.special(.InIdentifier) },
+    .{ .pattern = .{ .basic = .InIdentifier }, .result = CharacterClassToState.init(.EndIdentifier, &.{
+        .{ .pattern = .{ .basic = .Letter }, .result = .InIdentifier },
+        .{ .pattern = .{ .basic = .Digit  }, .result = .InIdentifier },
     }) },
 
-    .{ .pattern = .{ .basic = State.special(.InInteger) }, .result = CharToState.init(State.special(.EndInteger), &.{
-        .{ .pattern = .{ .basic = CharacterKind.special(.Digit)  }, .result = State.special(.InInteger) },
+    .{ .pattern = .{ .basic = .InInteger }, .result = CharacterClassToState.init(.EndInteger, &.{
+        .{ .pattern = .{ .basic = .Digit  }, .result = .InInteger },
     }) },
 
 });
 
 const state_widths_map = StaticIntegralMap(State, u1).init(1, &.{
-    .{ .pattern = .{ .basic =  State.special(.Eof)           }, .result = 0 },
-    .{ .pattern = .{ .basic =  State.special(.EndIdentifier) }, .result = 0 },
+    .{ .pattern = .{ .basic =  .Eof           }, .result = 0 },
+    .{ .pattern = .{ .basic =  .EndIdentifier }, .result = 0 },
+    .{ .pattern = .{ .basic =  .EndInteger    }, .result = 0 },
 });
 
 const final_states_map = StaticIntegralMap(State, bool).init(false, &.{
-    .{ .pattern = .{ .basic =  State.special(.Eof)           }, .result = true },
-    .{ .pattern = .{ .basic =  State.special(.Illegal)       }, .result = true },
-    .{ .pattern = .{ .basic =  State.special(.EndIdentifier) }, .result = true },
-    .{ .pattern = .{ .basic =  State.special(.EndInteger)    }, .result = true },
+    .{ .pattern = .{ .basic =  .Eof           }, .result = true },
+    .{ .pattern = .{ .basic =  .Illegal       }, .result = true },
+    .{ .pattern = .{ .basic =  .EndIdentifier }, .result = true },
+    .{ .pattern = .{ .basic =  .EndInteger    }, .result = true },
 
-    .{ .pattern = .{ .basic =  State.literal('(') }, .result = true },
-    .{ .pattern = .{ .basic =  State.literal(')') }, .result = true },
-
-    .{ .pattern = .{ .basic =  State.literal('{') }, .result = true },
-    .{ .pattern = .{ .basic =  State.literal('}') }, .result = true },
-
-    .{ .pattern = .{ .basic =  State.literal(';') }, .result = true },
-    .{ .pattern = .{ .basic =  State.literal(':') }, .result = true },
-    .{ .pattern = .{ .basic =  State.literal(',') }, .result = true },
-
-    .{ .pattern = .{ .basic =  State.literal('+') }, .result = true },
+    .{ .pattern = .{ .basic =  .GenericCharacter }, .result = true },
 });
 
-const keywords_map = std.StaticStringMap(TokenKind).initComptime(&.{
-    .{ "pub",  TokenKind.special(.KeywordPub) },
-    .{ "fn",   TokenKind.special(.KeywordFn)  },
+const TokenKind = union(enum) {
+    illegal: void,
+    identifier: void,
+    integer: u32,
 
-    .{ "void", TokenKind.special(.TypeVoid) },
-    .{ "i32",  TokenKind.special(.TypeI32)  },
+    keyword_pub: void,
+    keyword_fn: void,
+
+    type_void: void,
+    type_i32: void,
+
+    character: u8,
+};
+
+const keywords_map = std.StaticStringMap(TokenKind).initComptime(&.{
+    .{ "pub",  .keyword_pub },
+    .{ "fn",   .keyword_fn  },
+
+    .{ "void", .type_void },
+    .{ "i32",  .type_i32  },
 });
 
 const Tokenizer = struct {
@@ -160,17 +103,17 @@ const Tokenizer = struct {
         return .{ .source = source, .offset = 0 };
     }
 
-    pub fn next(self: *Self) ?struct { []const u8, TokenKind } {
+    pub fn next(self: *Self) !?struct { []const u8, TokenKind } {
         if (self.offset >= self.source.len) return null;
 
-        var state = State.special(.Start);
+        var state: State = .Start;
         var token_length: usize = 0;
 
         while (std.ascii.isWhitespace(self.source[self.offset])): (self.offset += 1) { }
 
         while (!final_states_map.get(state)) {
             const c = self.source[self.offset + token_length];
-            const character_kind = character_map.get(c);
+            const character_kind = character_class_map.get(c);
             state = transition_map.get(state).get(character_kind);
             token_length += state_widths_map.get(state);
         }
@@ -178,13 +121,13 @@ const Tokenizer = struct {
         const token = self.source[self.offset..(self.offset + token_length)];
         self.offset += token_length;
 
-        const kind = if (state.tag == .special) switch (state.data.special) {
-            .Illegal       => TokenKind.special(.Illegal),
-            .EndIdentifier => keywords_map.get(token) orelse TokenKind.special(.Identifier),
-            .EndInteger    => TokenKind.special(.Integer),
+        const kind: TokenKind = switch (state) {
+            .Illegal       => .illegal,
+            .EndIdentifier => keywords_map.get(token) orelse .identifier,
+            .EndInteger    => .{ .integer = try std.fmt.parseInt(u32, token, 10) },
+            .GenericCharacter => .{ .character = token[0] },
             else => unreachable,
-        } else
-            TokenKind.literal(token[0]);
+        };
 
         return .{ token, kind };
     }
@@ -193,16 +136,17 @@ const Tokenizer = struct {
 pub fn main() !void {
     const source = 
         \\pub fn add(a: i32, b: i32) i32 {
+        \\    c = 42;
         \\    return a + b;
         \\}
     ;
 
     var iter = Tokenizer.init(source);
-    while (iter.next()) |p| {
+    while (try iter.next()) |p| {
         const token, const kind = p;
-        switch (kind.tag) {
-            .special => std.debug.print("`{s}`: {any}\n", .{ token, kind.data.special }),
-            .literal => std.debug.print("`{s}`: {c}\n",   .{ token, kind.data.literal }),
+        switch (kind) {
+            .character => |c| std.debug.print("`{c}`\n", .{ c }),
+            else => std.debug.print("`{s}`: {any}\n", .{ token, kind }),
         }
     }
 }
