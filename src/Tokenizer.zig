@@ -14,6 +14,7 @@ pub const TokenKind = union(enum) {
 
     keyword_fn,
     keyword_let,
+    keyword_return,
 
     character: u8,
 };
@@ -39,6 +40,7 @@ const State = enum(u8) {
 const keywords = std.StaticStringMap(TokenKind).initComptime(&.{
     .{ "fn", .keyword_fn },
     .{ "let", .keyword_let },
+    .{ "return", .keyword_return },
 });
 
 pub fn init(source: [:0]const u8) Self {
@@ -90,7 +92,7 @@ pub fn next(self: *Self) Token {
         .integer => {
             self.offset += 1;
             switch (self.source[self.offset]) {
-                '_', '0'...'9', 'a'...'z', 'A'...'D' => continue :state .integer,
+                '_', '0'...'9', 'a'...'z', 'A'...'Z' => continue :state .integer,
                 '.' => continue :state .float,
                 else => break :state .integer,
             }
@@ -108,3 +110,8 @@ pub fn next(self: *Self) Token {
     return .{ .kind = kind, .offset = @intCast(token_start) };
 }
 
+test {
+    var iter = init("0xFF");
+    try std.testing.expectEqual(.integer, iter.next().kind);
+    try std.testing.expectEqual(.eof,     iter.next().kind);
+}
