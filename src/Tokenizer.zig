@@ -4,6 +4,43 @@ const Self = @This();
 source: [:0]const u8,
 offset: usize,
 
+pub const TokenKind = union(enum) {
+    eof,
+
+    identifier,
+    integer,
+    float,
+    line_comment,
+
+    keyword_fn,
+    keyword_let,
+
+    character: u8,
+};
+
+pub const Token = struct {
+    kind: TokenKind,
+    offset: u32,
+};
+
+const State = enum(u8) {
+    start,
+
+    identifier,
+    integer,
+    float,
+    line_comment,
+    
+    slash,
+};
+
+// TODO: replace this with perfect hashing,
+// because this does a linear search every time you want to match a keyword
+const keywords = std.StaticStringMap(TokenKind).initComptime(&.{
+    .{ "fn", .keyword_fn },
+    .{ "let", .keyword_let },
+});
+
 pub fn init(source: [:0]const u8) Self {
     return .{ .source = source, .offset = 0 };
 }
@@ -24,13 +61,16 @@ pub fn next(self: *Self) Token {
             '0'...'9' => continue :state .integer,
 
             '/' => continue :state .slash,
-            else => continue :state .single_character,
+            else => {
+                self.offset += 1;
+                break :state .{ .character = self.source[self.offset - 1] };
+            },
         },
         .slash => {
             self.offset += 1;
             switch (self.source[self.offset]) {
                 '/' => continue :state .line_comment,
-                else => break :state .character,
+                else => break :state .{ .character = '/' },
             }
         },
         .line_comment => {
@@ -50,12 +90,8 @@ pub fn next(self: *Self) Token {
         .integer => {
             self.offset += 1;
             switch (self.source[self.offset]) {
-                '_',
-                '0'...'9',
-                'a'...'z',
-                'A'...'D' => continue :state .integer,
-
-                '.'            => continue :state .float,
+                '_', '0'...'9', 'a'...'z', 'A'...'D' => continue :state .integer,
+                '.' => continue :state .float,
                 else => break :state .integer,
             }
         },
@@ -66,64 +102,9 @@ pub fn next(self: *Self) Token {
                 else => break :state .float,
             }
         },
-        .single_character => {
-            self.offset += 1;
-            break :state switch (self.source[self.offset - 1]) {
-                '(' => .l_paren, ')' => .r_paren,
-                '{' => .l_brace, '}' => .r_brace,
-                ':' => .colon, ';' => .semicolon, ',' => .comma,
-                '+' => .plus,  '-' => .minus,
-                '=' => .equal,
-
-                else => |c| std.debug.panic("unhandled start character: {c} ({})\n", .{ c, c }),
-            };
-        },
-        //else => |state| std.debug.panic("unhandled state: {any}", .{ state }),
     };
 
+    //std.debug.print("{s}\t{any}\n", .{ self.source[token_start..self.offset], kind });
     return .{ .kind = kind, .offset = @intCast(token_start) };
 }
-
-// TODO: replace this with perfect hashing,
-// because this does a linear search every time you want to match a keyword
-const keywords = std.StaticStringMap(TokenKind).initComptime(&.{
-    .{ "fn", .keyword_fn },
-    .{ "let", .keyword_let },
-});
-
-pub const TokenKind = enum {
-    eof,
-
-    identifier,
-    integer,
-    float,
-    character,
-    line_comment,
-
-    keyword_fn,
-    keyword_let,
-
-    l_paren, r_paren,
-    l_brace, r_brace,
-    colon, semicolon, comma,
-    plus, minus,
-    equal,
-};
-
-pub const Token = struct {
-    kind: TokenKind,
-    offset: u32,
-};
-
-const State = enum(u8) {
-    start,
-
-    identifier,
-    integer,
-    float,
-    line_comment,
-    
-    slash,
-    single_character,
-};
 
