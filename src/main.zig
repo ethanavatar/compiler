@@ -1,5 +1,23 @@
 const std = @import("std");
+const Token = @import("Token.zig");
 const Tokenizer = @import("Tokenizer.zig");
+
+const source = 
+    \\fn add(a: i32, b: i32) i32 {
+    \\    return a + b;
+    \\}
+    \\
+    \\fn main() void {
+    \\    let _f2  = 2.0;
+    \\    let _f02 = 0.2;
+    \\
+    \\    let decimal_int     = 98222;
+    \\    let hex_int         = 0xff;
+    \\    let another_hex_int = 0xFF;
+    \\    let octal_int       = 0o755;
+    \\    let binary_int      = 0b11110000;
+    \\}
+;
 
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -7,26 +25,7 @@ pub fn main() !void {
 
     const allocator = arena.allocator();
 
-    const source = 
-        \\pub fn add(a: i32, b: i32) i32 {
-        \\    c = 42; 
-        \\    _ = c; // Unused
-        \\    return a + b;
-        \\}
-        \\
-        \\pub fn main() !void {
-        \\    const _f2  = 2.0;
-        \\    const _f02 = 0.2;
-        \\
-        \\    const decimal_int = 98222;
-        \\    const hex_int = 0xff;
-        \\    const another_hex_int = 0xFF;
-        \\    const octal_int = 0o755;
-        \\    const binary_int = 0b11110000;
-        \\}
-    ;
-
-    var tokens: std.MultiArrayList(Tokenizer.Token) = .empty;
+    var tokens: std.MultiArrayList(Token.Token) = .empty;
     defer tokens.deinit(allocator);
 
     var iter = Tokenizer.init(source);
@@ -38,9 +37,8 @@ pub fn main() !void {
 
     var buffer: [1024]u8 = undefined;
     var stdout_writer = std.fs.File.stdout().writer(&buffer);
-    defer stdout_writer.end() catch { };
-
     const writer = &stdout_writer.interface;
+    defer writer.flush() catch { };
 
     for (tokens.items(.kind), tokens.items(.offset)) |kind, offset| {
         try writer.print("{}: {any}\n", .{ offset, kind });
