@@ -21,7 +21,7 @@ pub const TokenKind = union(enum) {
 
 pub const Token = struct {
     kind: TokenKind,
-    offset: u32,
+    start: u32, end: u32,
 };
 
 const State = enum(u8) {
@@ -107,7 +107,7 @@ pub fn next(self: *Self) Token {
     };
 
     //std.debug.print("{s}\t{any}\n", .{ self.source[token_start..self.offset], kind });
-    return .{ .kind = kind, .offset = @intCast(token_start) };
+    return .{ .kind = kind, .start = @intCast(token_start), .end = @intCast(self.offset) };
 }
 
 test {

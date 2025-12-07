@@ -48,10 +48,10 @@ pub fn main() !void {
     const f = parser.parseTopLevel() catch |e| switch (e) {
         error.UnexpectedToken => {
             const token = parser.tokens.get(parser.tokens_index);
-            var line_start = token.offset;
+            var line_start = token.start;
             while (source[line_start - 1] != '\n'): (line_start -= 1) { }
 
-            var line_end = token.offset;
+            var line_end = token.start;
             while (source[line_end] != '\n' and source[line_end] != '\r'): (line_end += 1) { }
 
             var line_number: usize = 0;
@@ -60,10 +60,10 @@ pub fn main() !void {
             }
 
             const source_line = source[line_start..line_end];
-            const column = token.offset - line_start;
-            std.debug.print("Expected {any}, but got {any} ({c})\n", .{
+            const column = token.start - line_start;
+            std.debug.print("Expected {any}, but got {any} ({s})\n", .{
                 parser.expected_token, token.kind,
-                source[token.offset],
+                source[token.start..token.end],
             });
             std.debug.print("{}:{}\n", .{ line_number, column });
             std.debug.print("{s}\n", .{ source_line });
@@ -74,26 +74,43 @@ pub fn main() !void {
         else => return e,
     };
 
-    std.debug.print("{any}\n", .{ parser.nodes.get(f) });
+    const f_node = parser.nodes.get(f);
+    f_node.print(&parser, source, 0);
 }
 
 const NodeIndex  = u32;
 const TokenIndex = u32;
 
-const NodeKind = union(enum) {
+const NodeKind = enum {
     type_name,
     integer,
     float,
-    let_statement: struct { identifier: NodeIndex, expression: NodeIndex },
-    return_statement: struct { expression: NodeIndex },
-    function_signature: struct { return_type: NodeIndex },
-    function: struct { signature: NodeIndex, body: NodeIndex },
-    block:    struct { statements: []NodeIndex },
+    identifier,
+
+    let_statement,
+    return_statement,
+    function_signature,
+    function,
+    block,
 };
 
 const Node = struct {
     kind: NodeKind,
-    token: TokenIndex,
+    start_token: TokenIndex,
+    end_token:   TokenIndex,
+    children: []NodeIndex,
+
+    pub fn print(self: *const @This(), parser: *const Parser, source_text: [:0]const u8, depth: usize) void {
+        std.debug.print("{: >[padding]}", .{ .padding = depth * 4 });
+        const start_token = parser.tokens.get(self.start_token);
+        const end_token = parser.tokens.get(self.end_token);
+        const string = source_text[start_token.start..end_token.end];
+        std.debug.print("{any}:  {s}\n", .{ self.kind, string });
+        for (self.children) |child| parser.nodes.get(child).print(parser, source_text, depth + 1);
+        if (self.children.len > 0) {
+            std.debug.print("\n", .{ });
+        }
+    }
 };
 
 const Parser = struct {
@@ -171,10 +188,12 @@ const Parser = struct {
             try statements.append(self.allocator, statement);
         }
 
-        _ = try self.expectToken(.{ .character = '}' });
+        const close_brace = try self.expectToken(.{ .character = '}' });
         return self.appendNode(.{
-            .kind = .{ .block = .{ .statements = statements.items } },
-            .token = open_brace,
+            .kind = .block,
+            .start_token = open_brace,
+            .end_token   = close_brace,
+            .children = statements.items,
         });
     }
 
@@ -184,11 +203,10 @@ const Parser = struct {
         const body = try self.parseBlock();
 
         return self.appendNode(.{
-            .kind = .{ .function = .{ 
-                .signature = signature,
-                .body = body,
-            } },
-            .token = keyword,
+            .kind = .function,
+            .start_token = keyword,
+            .end_token = self.tokens_index - 1,
+            .children = try self.allocator.dupe(NodeIndex, &.{ signature, body }),
         });
     }
 
@@ -202,15 +220,20 @@ const Parser = struct {
         const return_type = try self.parseTypeExpression();
 
         return self.setNode(index, .{
-            .kind = .{ .function_signature = .{ .return_type = return_type } },
-            .token = keyword,
+            .kind = .function_signature,
+            .start_token = keyword,
+            .end_token = self.tokens_index - 1,
+            .children = try self.allocator.dupe(NodeIndex, &.{ return_type }),
         });
     }
 
     fn parseTypeExpression(self: *Self) !NodeIndex {
+        const identifier = try self.expectToken(.identifier);
         return try self.appendNode(.{
             .kind = .type_name,
-            .token = try self.expectToken(.identifier),
+            .start_token = identifier,
+            .end_token = identifier,
+            .children = &.{ },
         });
     }
 
@@ -222,31 +245,42 @@ const Parser = struct {
         };
     }
 
+    fn parseIdentifier(self: *Self) !NodeIndex {
+        const identifier  = try self.expectToken(.identifier);
+        return try self.appendNode(.{
+            .kind = .identifier,
+            .start_token = identifier,
+            .end_token = identifier,
+            .children = &.{ },
+        });
+    }
+
     fn parseLetStatement(self: *Self) !NodeIndex {
         const let_keyword = try self.expectToken(.keyword_let);
-        const identifier  = try self.expectToken(.identifier);
+        const identifier  = try self.parseIdentifier();
 
         _ = try self.expectToken(.{ .character = '=' });
         const expression = try self.parseExpression();
-        _ = try self.expectToken(.{ .character = ';' });
+        const semicolon = try self.expectToken(.{ .character = ';' });
 
         return try self.appendNode(.{
-            .kind = .{ .let_statement = .{
-                .identifier = identifier,
-                .expression = expression,
-            } },
-            .token = let_keyword,
+            .kind = .let_statement,
+            .start_token = let_keyword,
+            .end_token = semicolon,
+            .children = try self.allocator.dupe(NodeIndex, &.{ identifier, expression }),
         });
     }
 
     fn parseReturnStatement(self: *Self) !NodeIndex {
         const keyword = try self.expectToken(.keyword_return);
         const expression = try self.parseExpression();
-        _ = try self.expectToken(.{ .character = ';' });
+        const semicolon = try self.expectToken(.{ .character = ';' });
 
         return try self.appendNode(.{
-            .kind = .{ .return_statement = .{ .expression = expression } },
-            .token = keyword,
+            .kind = .return_statement,
+            .start_token = keyword,
+            .end_token = semicolon,
+            .children = try self.allocator.dupe(NodeIndex, &.{ expression }),
         });
     }
 
@@ -261,7 +295,9 @@ const Parser = struct {
 
         return try self.appendNode(.{
             .kind = kind,
-            .token = token,
+            .start_token = token,
+            .end_token = token,
+            .children = &.{ },
         });
     }
 };
