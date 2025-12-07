@@ -1,5 +1,4 @@
 const std = @import("std");
-const Token = @import("Token.zig");
 const Tokenizer = @import("Tokenizer.zig");
 
 const source = 
@@ -25,7 +24,7 @@ pub fn main() !void {
 
     const allocator = arena.allocator();
 
-    var tokens: std.MultiArrayList(Token.Token) = .empty;
+    var tokens: std.MultiArrayList(Tokenizer.Token) = .empty;
     defer tokens.deinit(allocator);
 
     var iter = Tokenizer.init(source);
@@ -43,5 +42,12 @@ pub fn main() !void {
     for (tokens.items(.kind), tokens.items(.offset)) |kind, offset| {
         try writer.print("{}: {any}\n", .{ offset, kind });
     }
+
+    try std.testing.expectEqual(tokens.items(.kind)[0], .keyword_fn);
 }
 
+//const Parser = struct {
+//    pub fn parseFunctionSignature() {
+//        
+//    }
+//};
